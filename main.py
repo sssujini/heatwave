@@ -7,7 +7,7 @@ import io
 import copy
 
 # --------------------------------------------------
-# 1. 페이지 설정 & 맞춤 스타일링 (CSS)
+# 1. 페이지 설정 및 디자인 CSS
 # --------------------------------------------------
 st.set_page_config(
     page_title="전국 폭염일수 대시보드",
@@ -15,15 +15,13 @@ st.set_page_config(
     layout="wide"
 )
 
-# 세련된 폰트와 카드형 레이아웃 스타일 적용
 st.markdown("""
 <style>
-    .metric-card {
-        background-color: #f8fafc;
+    /* 지도 컨테이너 배경을 화사한 미색/소프트 그레이로 설정 */
+    iframe {
+        background-color: #f8fafc !important;
         border-radius: 12px;
-        padding: 16px;
-        border: 1px solid #e2e8f0;
-        box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.06);
     }
     .stDataFrame {
         border-radius: 8px;
@@ -33,7 +31,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("☀️ 전국 시군구별 폭염일수 대시보드")
-st.caption("기상청 관측망 데이터를 바탕으로 제작된 전국 시군구 폭염일수 단계구분도입니다.")
+st.caption("기상청 종관관측망 데이터를 전국 시군구 지리 경계에 매핑한 대화형 지도입니다.")
 
 # --------------------------------------------------
 # 2. 데이터 로딩 (기상청 복합 CSV 파싱)
@@ -137,7 +135,7 @@ with m2:
 with m3:
     st.metric(label="관측 지점 수", value=f"{len(df_counts)}개 지역")
 
-st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
 
 # --------------------------------------------------
 # 6. GeoJSON 데이터 결합
@@ -158,18 +156,17 @@ for feature in geojson_display['features']:
     feature['properties']['폭염일수'] = f"{val}일" if val is not None else "관측소 없음"
 
 # --------------------------------------------------
-# 7. 세련된 Folium 맵 생성 (모던 미니멀 스타일)
+# 7. 워터마크 영구 제거 & 순수 인포그래픽 맵 생성
 # --------------------------------------------------
-# 1) 워터마크 없는 초깔끔 모노톤 밝은 베이스맵 타일 적용
+# ★ tiles=None 설정으로 외부 유료 타일서버 워터마크 완전 차단
 m = folium.Map(
     location=[35.9, 127.8],
     zoom_start=7,
-    tiles="https://basemaps.cartocdn.com/rastertiles/light_nolabels/{z}/{x}/{y}.png",
-    attr="&copy; <a href='https://www.openstreetmap.org/copyright'>OpenStreetMap</a> contributors, &copy; <a href='https://carto.com/attributions'>CARTO</a>",
+    tiles=None,
     zoom_control=True
 )
 
-# 2) 5단계 색상 구간 계산
+# 5단계 색상 구간 계산
 min_val = float(df_counts['폭염일수'].min())
 max_val = float(df_counts['폭염일수'].max())
 
@@ -179,35 +176,28 @@ else:
     step = (max_val - min_val) / 5.0
     bins = [round(min_val + i * step, 1) for i in range(6)]
 
-# 3) 단계구분도 레이어 추가 (부드러운 컬러 톤 & 깔끔한 무채색 결측 처리)
+# 단계구분도 레이어 추가 (선명한 YlOrRd 컬러 팔레트 & 깔끔한 경계선)
 folium.Choropleth(
     geo_data=geojson_display,
     data=df_counts,
     columns=['시군구', '폭염일수'],
     key_on="feature.properties.시군구",
     fill_color="YlOrRd",
-    fill_opacity=0.75,
-    line_color="#ffffff",        # 경계선을 얇은 흰색으로 주어 세련된 분할 효과
-    line_weight=0.8,
-    line_opacity=0.85,
+    fill_opacity=0.88,
+    line_color="#cbd5e1",        # 연한 슬레이트 그레이 경계선
+    line_weight=0.7,
+    line_opacity=1.0,
     legend_name=f"{selected_year}년 시군구 폭염일수 (일)",
     bins=bins,
-    nan_fill_color="#f1f5f9",     # 결측 지역: 산뜻한 라이트 슬레이트
-    nan_fill_opacity=0.6
+    nan_fill_color="#e2e8f0",     # 관측소 없는 지역: 세련된 밝은 회색
+    nan_fill_opacity=0.7
 ).add_to(m)
 
-# 4) 지명(영문/한글 라벨)만 지도 위에 오버레이하여 가독성 강화
-folium.TileLayer(
-    tiles="https://basemaps.cartocdn.com/rastertiles/light_only_labels/{z}/{x}/{y}.png",
-    attr="&copy; CARTO",
-    overlay=True,
-    opacity=0.85
-).add_to(m)
-
-# 5) 마우스오버 툴팁
+# 마우스오버 툴팁 및 인터랙션 레이어
 folium.GeoJson(
     geojson_display,
     style_function=lambda x: {'fillColor': 'transparent', 'color': 'transparent'},
+    highlight_function=lambda x: {'weight': 2.5, 'color': '#1e293b', 'fillOpacity': 0.95},
     tooltip=folium.GeoJsonTooltip(
         fields=['시도', '시군구', '폭염일수'],
         aliases=['시·도:', '시·군·구:', '폭염일수:'],
@@ -216,11 +206,10 @@ folium.GeoJson(
     )
 ).add_to(m)
 
-# Streamlit 렌더링
-st_folium(m, width="100%", height=620, key=f"heatwave_map_v2_{selected_year}", returned_objects=[])
+st_folium(m, width="100%", height=620, key=f"clean_heatwave_map_{selected_year}", returned_objects=[])
 
 # --------------------------------------------------
-# 8. 상위 / 하위 순위 표 (시각적 개선)
+# 8. 상위 / 하위 순위 표
 # --------------------------------------------------
 st.divider()
 
