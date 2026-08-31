@@ -18,7 +18,7 @@ st.title("☀️ 전국 시군구별 폭염일수 현황 지도")
 st.caption("기상청 폭염일수 관측 데이터를 전국 시군구 지리 경계(GeoJSON)에 매핑한 대화형 지도입니다.")
 
 # --------------------------------------------------
-# 2. 데이터 로딩 (기상청 특수 복합 CSV 구조 파싱)
+# 2. 데이터 로딩 (기상청 복합 CSV 구조 파싱)
 # --------------------------------------------------
 GEOJSON_URL = "https://raw.githubusercontent.com/greatsong/modudata/main/data/boundaries/sigungu_kr.geojson"
 
@@ -29,8 +29,8 @@ def load_geojson(url):
 
 @st.cache_data
 def load_heatwave_data():
-    """복합 CSV에서 '년도,날짜,지점'이 시작되는 53행 이후 데이터를 파싱합니다."""
-    # CP949 인코딩 우선 적용
+    """복합 CSV에서 '년도,날짜,지점'이 시작되는 행 이후 데이터를 파싱합니다."""
+    # CP949 인코딩 우선 적용 (기상청 기본 인코딩)
     try:
         with open("heatwave.csv", "r", encoding="cp949") as f:
             lines = f.readlines()
@@ -46,15 +46,13 @@ def load_heatwave_data():
             break
             
     if start_idx is None:
-        # 혹시 못 찾을 경우 53행 기본 지정
         start_idx = 53
 
     csv_data = "".join(lines[start_idx:])
     df = pd.read_csv(io.StringIO(csv_data))
     
-    # 열 이름 공백 제거
+    # 열 이름 공백 제거 및 결측치 정제
     df.columns = [c.strip() for c in df.columns]
-    # 빈 행 정제
     df = df.dropna(subset=['년도', '지점'])
     df['년도'] = df['년도'].astype(int)
     return df
@@ -69,7 +67,6 @@ except Exception as e:
 # --------------------------------------------------
 # 3. 기상청 관측지점 -> 행정구역(시군구) 매핑 사전
 # --------------------------------------------------
-# 기상청 주요 관측 지점명을 시군구 단위 GeoJSON 명칭과 1:1 대응
 STATION_TO_SIGUNGU = {
     '강릉': '강릉시', '강화': '강화군', '거제': '거제시', '거창': '거창군', 
     '고흥': '고흥군', '광주': '광주', '구미': '구미시', '군산': '군산시', 
@@ -98,7 +95,7 @@ years = sorted(df_raw['년도'].unique())
 selected_year = st.sidebar.select_slider(
     "📅 연도 선택",
     options=years,
-    value=years[-1] # 기본값: 가장 최근 연도
+    value=years[-1]  # 기본값: 가장 최근 연도
 )
 
 # 선택 연도의 데이터 필터링
@@ -115,20 +112,16 @@ df_counts['시군구'] = df_counts['지점'].map(STATION_TO_SIGUNGU)
 # --------------------------------------------------
 geojson_display = copy.deepcopy(geojson_raw)
 
-# 빠른 매칭을 위한 딕셔너리 생성
 heatwave_map = dict(zip(df_counts['시군구'], df_counts['폭염일수']))
 
 # GeoJSON 피처 속성에 폭염일수 주입
-# (특별/광역시의 경우 구 단위 피처에 해당 시의 값을 공통 부여)
 for feature in geojson_display['features']:
     sido = feature['properties'].get('시도', '')
     sigungu = feature['properties'].get('시군구', '')
     
     val = None
-    # 1. 시군구 이름으로 직접 매칭
     if sigungu in heatwave_map:
         val = heatwave_map[sigungu]
-    # 2. 광역시/특별시 등 상위 시도 매칭 (서울, 대구, 광주, 대전, 울산, 부산, 인천 등)
     elif sido in heatwave_map:
         val = heatwave_map[sido]
         
@@ -139,7 +132,12 @@ for feature in geojson_display['features']:
 # --------------------------------------------------
 st.subheader(f"🗺️ {selected_year}년 전국 시군구별 폭염일수 단계구분도")
 
-m = folium.Map(location=[36.0, 127.8], zoom_start=7, tiles="CartoDB positron")
+# ★ 워터마크(API KEY REQUIRED)가 없는 오픈소스 기본 지도(OpenStreetMap) 사용
+m = folium.Map(
+    location=[36.0, 127.8], 
+    zoom_start=7, 
+    tiles="OpenStreetMap"
+)
 
 # 구간 설정 (최소값 ~ 최대값 균등 5분할)
 min_val = float(df_counts['폭염일수'].min())
@@ -151,7 +149,7 @@ else:
     step = (max_val - min_val) / 5.0
     bins = [round(min_val + i * step, 1) for i in range(6)]
 
-# 단계구분도 레이어
+# 단계구분도 레이어 추가
 folium.Choropleth(
     geo_data=geojson_display,
     data=df_counts,
@@ -159,14 +157,14 @@ folium.Choropleth(
     key_on="feature.properties.시군구",
     fill_color="YlOrRd",
     fill_opacity=0.7,
-    line_opacity=0.2,
+    line_opacity=0.3,
     legend_name=f"{selected_year}년 폭염일수 (일)",
     bins=bins,
-    nan_fill_color="#f0f0f0",
-    nan_fill_opacity=0.3
+    nan_fill_color="#e0e0e0",
+    nan_fill_opacity=0.4
 ).add_to(m)
 
-# 툴팁 레이어
+# 툴팁 레이어 추가
 folium.GeoJson(
     geojson_display,
     style_function=lambda x: {'fillColor': '#00000000', 'color': '#00000000'},
@@ -178,6 +176,7 @@ folium.GeoJson(
     )
 ).add_to(m)
 
+# Streamlit에 지도 렌더링
 st_folium(m, width="100%", height=600, key=f"heatwave_map_{selected_year}", returned_objects=[])
 
 # --------------------------------------------------
@@ -210,6 +209,6 @@ with col2:
 with st.expander("ℹ️ 관측소 및 지도 데이터 매핑 안내"):
     st.markdown("""
     - **데이터 출처**: 기상청 종관기상관측(ASOS) 폭염일수 데이터 (총 62개 주요 관측지점)
-    - **관측소 없는 지역**: 회색으로 표시되며 툴팁에 `관측소 없음`으로 표시됩니다.
+    - **관측소 없는 지역**: 회색으로 표시되며 마우스 오버 시 `관측소 없음`으로 나타납니다.
     - **광역시·특별시**: 기상청 대표 지점(예: 서울, 대구 등)의 관측값을 관내 자치구에 공통 반영했습니다.
     """)
