@@ -7,7 +7,7 @@ import io
 import copy
 
 # --------------------------------------------------
-# 1. 페이지 설정 & 맞춤 스타일
+# 1. 페이지 설정
 # --------------------------------------------------
 st.set_page_config(
     page_title="전국 폭염일수 대시보드",
@@ -37,7 +37,6 @@ def load_heatwave_data():
         with open("heatwave.csv", "r", encoding="utf-8") as f:
             lines = f.readlines()
 
-    # '년도,날짜,지점' 실제 데이터 시작 행 탐색
     start_idx = None
     for idx, line in enumerate(lines):
         if "년도" in line and "지점" in line:
@@ -102,7 +101,6 @@ st.sidebar.info(
     "기상청 전국 62개 종관기상관측소 관측 통계를 기반으로 집계되었습니다."
 )
 
-# 데이터 집계
 df_year = df_raw[df_raw['년도'] == selected_year]
 df_counts = df_year.groupby('지점').size().reset_index(name='폭염일수')
 df_counts['시군구'] = df_counts['지점'].map(STATION_TO_SIGUNGU)
@@ -140,11 +138,10 @@ for feature in geojson_display['features']:
     feature['properties']['폭염일수'] = f"{val}일" if val is not None else "관측소 없음"
 
 # --------------------------------------------------
-# 7. 예쁜 지도 생성 (Esri Light Gray Canvas: 워터마크 없음, 화사한 미색)
+# 7. 예쁜 지도 생성 (Esri Light Gray Canvas)
 # --------------------------------------------------
 st.subheader(f"🗺️ {selected_year}년 전국 폭염일수 지도")
 
-# 무료이며 워터마크가 없는 Esri의 깨끗한 캔버스 타일
 m = folium.Map(
     location=[36.0, 127.8],
     zoom_start=7,
@@ -152,7 +149,6 @@ m = folium.Map(
     attr="Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ"
 )
 
-# 5단계 구간 계산
 min_val = float(df_counts['폭염일수'].min())
 max_val = float(df_counts['폭염일수'].max())
 
@@ -162,7 +158,6 @@ else:
     step = (max_val - min_val) / 5.0
     bins = [round(min_val + i * step, 1) for i in range(6)]
 
-# 단계구분도 레이어 추가
 folium.Choropleth(
     geo_data=geojson_display,
     data=df_counts,
@@ -170,16 +165,15 @@ folium.Choropleth(
     key_on="feature.properties.시군구",
     fill_color="YlOrRd",
     fill_opacity=0.78,
-    line_color="#ffffff",        # 경계를 깔끔한 흰색 라인으로 분할
+    line_color="#ffffff",
     line_weight=1.0,
     line_opacity=0.9,
     legend_name=f"{selected_year}년 폭염일수 (일)",
     bins=bins,
-    nan_fill_color="#f8fafc",     # 관측소 없는 지역: 맑은 아이보리 화이트
+    nan_fill_color="#f8fafc",
     nan_fill_opacity=0.5
 ).add_to(m)
 
-# 마우스 툴팁 레이어 추가 (오류를 유발하는 속성 제거 후 안정화)
 folium.GeoJson(
     geojson_display,
     style_function=lambda x: {
@@ -195,35 +189,50 @@ folium.GeoJson(
     )
 ).add_to(m)
 
-# 지도 출력
 st_folium(m, width="100%", height=620, key=f"heatwave_map_{selected_year}", returned_objects=[])
 
 # --------------------------------------------------
-# 8. 상위 / 하위 순위 표
+# 8. 상위 / 하위 순위 표 (Matplotlib 종속성 제거 및 ProgressColumn 적용)
 # --------------------------------------------------
 st.divider()
 st.subheader(f"📊 {selected_year}년 폭염일수 순위")
 
 col1, col2 = st.columns(2)
 
+# 데이터 정렬
 top_10 = df_counts.sort_values(by='폭염일수', ascending=False).head(10)[['지점', '시군구', '폭염일수']].reset_index(drop=True)
 top_10.index = top_10.index + 1
-top_10.rename(columns={'지점': '관측지점', '폭염일수': '폭염일수 (일)'}, inplace=True)
+top_10.rename(columns={'지점': '관측지점'}, inplace=True)
 
 bottom_10 = df_counts.sort_values(by='폭염일수', ascending=True).head(10)[['지점', '시군구', '폭염일수']].reset_index(drop=True)
 bottom_10.index = bottom_10.index + 1
-bottom_10.rename(columns={'지점': '관측지점', '폭염일수': '폭염일수 (일)'}, inplace=True)
+bottom_10.rename(columns={'지점': '관측지점'}, inplace=True)
+
+# 스트림릿 내장 차트 컬럼 설정 (오류 없이 깔끔한 막대 그래프 표현)
+max_heatwave_val = int(df_counts['폭염일수'].max())
+
+column_config = {
+    "폭염일수": st.column_config.ProgressColumn(
+        "폭염일수 (일)",
+        help="관측된 폭염일수",
+        format="%d일",
+        min_value=0,
+        max_value=max_heatwave_val,
+    )
+}
 
 with col1:
     st.markdown("#### 🔥 **폭염 많은 상위 10곳**")
     st.dataframe(
-        top_10.style.background_gradient(subset=['폭염일수 (일)'], cmap='YlOrRd'),
+        top_10,
+        column_config=column_config,
         use_container_width=True
     )
 
 with col2:
     st.markdown("#### 🧊 **폭염 적은 하위 10곳**")
     st.dataframe(
-        bottom_10.style.background_gradient(subset=['폭염일수 (일)'], cmap='Blues_r'),
+        bottom_10,
+        column_config=column_config,
         use_container_width=True
     )
