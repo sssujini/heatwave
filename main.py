@@ -28,18 +28,36 @@ def load_geojson(url):
 
 @st.cache_data
 def load_heatwave_data():
-    """폭염일수 CSV 파일을 불러옵니다."""
+    """폭염일수 CSV 파일을 불러옵니다. (상단 메타데이터/주석 행 자동 건너뛰기)"""
+    file_path = "heatwave.csv"
+    
+    # 1. 인코딩 확인 (cp949 또는 utf-8)
+    encoding_type = "utf-8"
     try:
-        return pd.read_csv("heatwave.csv", encoding="utf-8")
+        with open(file_path, "r", encoding="utf-8") as f:
+            lines = [f.readline() for _ in range(30)]
     except UnicodeDecodeError:
-        return pd.read_csv("heatwave.csv", encoding="cp949")
-
-try:
-    geojson_raw = load_geojson(GEOJSON_URL)
-    df_raw = load_heatwave_data()
-except Exception as e:
-    st.error(f"데이터를 불러오는 중 오류가 발생했습니다: {e}")
-    st.stop()
+        encoding_type = "cp949"
+        with open(file_path, "r", encoding="cp949") as f:
+            lines = [f.readline() for _ in range(30)]
+            
+    # 2. 실제 표의 헤더가 시작되는 줄 번호 탐색 (쉼표가 가장 많이 포함된 줄)
+    header_idx = 0
+    max_commas = 0
+    for idx, line in enumerate(lines):
+        comma_count = line.count(",")
+        if comma_count > max_commas:
+            max_commas = comma_count
+            header_idx = idx
+            
+    # 3. 불필요한 상단 안내 문구를 건너뛰고(header=header_idx) 데이터 읽기
+    df = pd.read_csv(
+        file_path,
+        encoding=encoding_type,
+        header=header_idx,
+        on_bad_lines="skip"  # 규격 외 오류 행은 건너뛰기
+    )
+    return df
 
 # --------------------------------------------------
 # 3. 사용자 설정: CSV 열 이름 지정
