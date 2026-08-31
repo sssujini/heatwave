@@ -7,31 +7,16 @@ import io
 import copy
 
 # --------------------------------------------------
-# 1. 페이지 설정 및 디자인 CSS
+# 1. 페이지 설정 & 맞춤 스타일
 # --------------------------------------------------
 st.set_page_config(
     page_title="전국 폭염일수 대시보드",
-    page_icon="🔥",
+    page_icon="☀️",
     layout="wide"
 )
 
-st.markdown("""
-<style>
-    /* 지도 컨테이너 배경을 화사한 미색/소프트 그레이로 설정 */
-    iframe {
-        background-color: #f8fafc !important;
-        border-radius: 12px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.06);
-    }
-    .stDataFrame {
-        border-radius: 8px;
-        overflow: hidden;
-    }
-</style>
-""", unsafe_allow_html=True)
-
 st.title("☀️ 전국 시군구별 폭염일수 대시보드")
-st.caption("기상청 종관관측망 데이터를 전국 시군구 지리 경계에 매핑한 대화형 지도입니다.")
+st.caption("기상청 종관관측망 데이터를 바탕으로 한 전국 시군구 폭염일수 단계구분도입니다.")
 
 # --------------------------------------------------
 # 2. 데이터 로딩 (기상청 복합 CSV 파싱)
@@ -52,6 +37,7 @@ def load_heatwave_data():
         with open("heatwave.csv", "r", encoding="utf-8") as f:
             lines = f.readlines()
 
+    # '년도,날짜,지점' 실제 데이터 시작 행 탐색
     start_idx = None
     for idx, line in enumerate(lines):
         if "년도" in line and "지점" in line:
@@ -77,7 +63,7 @@ except Exception as e:
     st.stop()
 
 # --------------------------------------------------
-# 3. 기상청 관측지점 -> 행정구역 매핑
+# 3. 기상청 관측지점 -> 행정구역 매핑 사전
 # --------------------------------------------------
 STATION_TO_SIGUNGU = {
     '강릉': '강릉시', '강화': '강화군', '거제': '거제시', '거창': '거창군', 
@@ -99,21 +85,21 @@ STATION_TO_SIGUNGU = {
 }
 
 # --------------------------------------------------
-# 4. 사이드바 필터 & 연도 선택
+# 4. 사이드바 필터
 # --------------------------------------------------
-st.sidebar.markdown("### 🎛️ 필터 설정")
+st.sidebar.header("🔍 조회 옵션")
 
 years = sorted(df_raw['년도'].unique())
 selected_year = st.sidebar.select_slider(
-    "조회 연도 선택",
+    "📅 연도 선택",
     options=years,
     value=years[-1]
 )
 
 st.sidebar.markdown("---")
 st.sidebar.info(
-    f"📍 **{selected_year}년 데이터 분석 중**\n\n"
-    "기상청 62개 대표 종관관측소 자료를 기반으로 산출되었습니다."
+    f"📍 **{selected_year}년 데이터 분석**\n\n"
+    "기상청 전국 62개 종관기상관측소 관측 통계를 기반으로 집계되었습니다."
 )
 
 # 데이터 집계
@@ -122,20 +108,18 @@ df_counts = df_year.groupby('지점').size().reset_index(name='폭염일수')
 df_counts['시군구'] = df_counts['지점'].map(STATION_TO_SIGUNGU)
 
 # --------------------------------------------------
-# 5. 핵심 요약 메트릭 카드
+# 5. 핵심 지표 카드
 # --------------------------------------------------
-max_row = df_counts.sort_values(by='폭염일수', ascending=False).iloc[0]
-avg_heatwave = df_counts['폭염일수'].mean()
+if not df_counts.empty:
+    max_row = df_counts.sort_values(by='폭염일수', ascending=False).iloc[0]
+    avg_val = df_counts['폭염일수'].mean()
 
-m1, m2, m3 = st.columns(3)
-with m1:
-    st.metric(label="전국 평균 폭염일수", value=f"{avg_heatwave:.1f}일")
-with m2:
-    st.metric(label="최다 폭염 관측지", value=f"{max_row['지점']} ({max_row['폭염일수']}일)")
-with m3:
-    st.metric(label="관측 지점 수", value=f"{len(df_counts)}개 지역")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("전국 평균 폭염일수", f"{avg_val:.1f}일")
+    m2.metric("최다 폭염 관측지", f"{max_row['지점']} ({max_row['폭염일수']}일)")
+    m3.metric("관측 지점 수", f"{len(df_counts)}개 지역")
 
-st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+st.write("")
 
 # --------------------------------------------------
 # 6. GeoJSON 데이터 결합
@@ -156,17 +140,19 @@ for feature in geojson_display['features']:
     feature['properties']['폭염일수'] = f"{val}일" if val is not None else "관측소 없음"
 
 # --------------------------------------------------
-# 7. 워터마크 영구 제거 & 순수 인포그래픽 맵 생성
+# 7. 예쁜 지도 생성 (Esri Light Gray Canvas: 워터마크 없음, 화사한 미색)
 # --------------------------------------------------
-# ★ tiles=None 설정으로 외부 유료 타일서버 워터마크 완전 차단
+st.subheader(f"🗺️ {selected_year}년 전국 폭염일수 지도")
+
+# 무료이며 워터마크가 없는 Esri의 깨끗한 캔버스 타일
 m = folium.Map(
-    location=[35.9, 127.8],
+    location=[36.0, 127.8],
     zoom_start=7,
-    tiles=None,
-    zoom_control=True
+    tiles="https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    attr="Tiles &copy; Esri &mdash; Esri, DeLorme, NAVTEQ"
 )
 
-# 5단계 색상 구간 계산
+# 5단계 구간 계산
 min_val = float(df_counts['폭염일수'].min())
 max_val = float(df_counts['폭염일수'].max())
 
@@ -176,42 +162,47 @@ else:
     step = (max_val - min_val) / 5.0
     bins = [round(min_val + i * step, 1) for i in range(6)]
 
-# 단계구분도 레이어 추가 (선명한 YlOrRd 컬러 팔레트 & 깔끔한 경계선)
+# 단계구분도 레이어 추가
 folium.Choropleth(
     geo_data=geojson_display,
     data=df_counts,
     columns=['시군구', '폭염일수'],
     key_on="feature.properties.시군구",
     fill_color="YlOrRd",
-    fill_opacity=0.88,
-    line_color="#cbd5e1",        # 연한 슬레이트 그레이 경계선
-    line_weight=0.7,
-    line_opacity=1.0,
-    legend_name=f"{selected_year}년 시군구 폭염일수 (일)",
+    fill_opacity=0.78,
+    line_color="#ffffff",        # 경계를 깔끔한 흰색 라인으로 분할
+    line_weight=1.0,
+    line_opacity=0.9,
+    legend_name=f"{selected_year}년 폭염일수 (일)",
     bins=bins,
-    nan_fill_color="#e2e8f0",     # 관측소 없는 지역: 세련된 밝은 회색
-    nan_fill_opacity=0.7
+    nan_fill_color="#f8fafc",     # 관측소 없는 지역: 맑은 아이보리 화이트
+    nan_fill_opacity=0.5
 ).add_to(m)
 
-# 마우스오버 툴팁 및 인터랙션 레이어
+# 마우스 툴팁 레이어 추가 (오류를 유발하는 속성 제거 후 안정화)
 folium.GeoJson(
     geojson_display,
-    style_function=lambda x: {'fillColor': 'transparent', 'color': 'transparent'},
-    highlight_function=lambda x: {'weight': 2.5, 'color': '#1e293b', 'fillOpacity': 0.95},
+    style_function=lambda x: {
+        'fillColor': '#00000000',
+        'color': '#00000000',
+        'weight': 0
+    },
     tooltip=folium.GeoJsonTooltip(
         fields=['시도', '시군구', '폭염일수'],
-        aliases=['시·도:', '시·군·구:', '폭염일수:'],
+        aliases=['시도:', '시군구:', '폭염일수:'],
         localize=True,
         sticky=True
     )
 ).add_to(m)
 
-st_folium(m, width="100%", height=620, key=f"clean_heatwave_map_{selected_year}", returned_objects=[])
+# 지도 출력
+st_folium(m, width="100%", height=620, key=f"heatwave_map_{selected_year}", returned_objects=[])
 
 # --------------------------------------------------
 # 8. 상위 / 하위 순위 표
 # --------------------------------------------------
 st.divider()
+st.subheader(f"📊 {selected_year}년 폭염일수 순위")
 
 col1, col2 = st.columns(2)
 
@@ -224,14 +215,14 @@ bottom_10.index = bottom_10.index + 1
 bottom_10.rename(columns={'지점': '관측지점', '폭염일수': '폭염일수 (일)'}, inplace=True)
 
 with col1:
-    st.markdown(f"#### 🔥 **폭염이 가장 극심했던 10곳**")
+    st.markdown("#### 🔥 **폭염 많은 상위 10곳**")
     st.dataframe(
         top_10.style.background_gradient(subset=['폭염일수 (일)'], cmap='YlOrRd'),
         use_container_width=True
     )
 
 with col2:
-    st.markdown(f"#### 🧊 **상대적으로 시원했던 10곳**")
+    st.markdown("#### 🧊 **폭염 적은 하위 10곳**")
     st.dataframe(
         bottom_10.style.background_gradient(subset=['폭염일수 (일)'], cmap='Blues_r'),
         use_container_width=True
